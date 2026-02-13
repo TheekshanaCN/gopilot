@@ -11,6 +11,7 @@ from typing import Any, Callable, Protocol
 
 from gopilot.gopro.client import GoProClient
 from gopilot.gopro.commands import CameraAction, CameraIntent, CameraMode
+from gopilot.logging import set_session_id
 
 
 class CommandExecutor:
@@ -120,6 +121,7 @@ class SessionController:
         stop_criteria: Callable[[SessionContext, dict[str, Any]], bool] | None = None,
     ) -> SessionContext:
         session = SessionContext(prompt=prompt, mode=mode)
+        set_session_id(session.session_id)
         self._stop_requested = False
         self._logs_dir.mkdir(parents=True, exist_ok=True)
         log_path = self._logs_dir / f"{session.session_id}.jsonl"
@@ -158,6 +160,7 @@ class SessionController:
 
         session.state = SessionState.IDLE
         self._write_log(log_path, session, {"capture_state": "idle"}, {"ended": True}, None, "Session ended")
+        set_session_id(None)
         return session
 
     def _planner_prompt(

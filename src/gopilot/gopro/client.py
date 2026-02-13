@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +17,9 @@ from gopilot.gopro.commands import (
     hero7_setting_path,
     hero7_mode_from_camera_mode,
 )
+from gopilot.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class GoProClientError(RuntimeError):
@@ -37,26 +41,77 @@ class GoProResponseError(GoProClientError):
         self.body = body
 
 
+class CircuitBreakerOpenError(GoProClientError):
+    pass
+
+
 class GoProClient:
     def __init__(self, config: Optional[GoProConfig] = None):
         self._config = config or GoProConfig()
+        self._consecutive_failures = 0
+        self._opened_at: float | None = None
 
     def _build_url(self, endpoint: Hero7Endpoint | str) -> str:
         path = endpoint.value if isinstance(endpoint, Hero7Endpoint) else endpoint
         return f"http://{self._config.host}{path}"
 
-    def _request(self, path: Hero7Endpoint | str, params: Optional[dict[str, Any]] = None) -> requests.Response:
-        url = self._build_url(path)
-        try:
-            response = requests.get(url, params=params, timeout=self._config.timeout_seconds)
-        except requests.Timeout as exc:
-            raise GoProTimeoutError(f"GoPro request timed out for {url}") from exc
-        except requests.RequestException as exc:
-            raise GoProClientError(f"GoPro request error for {url}: {exc}") from exc
+    def _check_circuit(self) -> None:
+        if self._opened_at is None:
+            return
+        elapsed = time.monotonic() - self._opened_at
+        if elapsed >= self._config.circuit_breaker_reset_seconds:
+            self._opened_at = None
+            self._consecutive_failures = 0
+            logger.info("Circuit breaker reset")
+            return
+        raise CircuitBreakerOpenError("GoPro circuit breaker is open; refusing request")
 
-        if response.status_code != 200:
-            raise GoProResponseError(response.status_code, response.url, response.text)
-        return response
+    def _record_success(self) -> None:
+        self._consecutive_failures = 0
+        self._opened_at = None
+
+    def _record_failure(self) -> None:
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._config.circuit_breaker_threshold:
+            self._opened_at = time.monotonic()
+            logger.warning("Circuit breaker opened after repeated GoPro failures")
+
+    def _request(self, path: Hero7Endpoint | str, params: Optional[dict[str, Any]] = None) -> requests.Response:
+        self._check_circuit()
+        url = self._build_url(path)
+        delay_s = self._config.retry_backoff_seconds
+        attempts = self._config.retry_attempts + 1
+
+        for attempt in range(1, attempts + 1):
+            try:
+                response = requests.get(url, params=params, timeout=self._config.timeout_seconds)
+                if response.status_code == 200:
+                    self._record_success()
+                    return response
+
+                if 500 <= response.status_code < 600 and attempt < attempts:
+                    self._record_failure()
+                    logger.warning("Retrying GoPro request after server error", extra={"status_code": response.status_code})
+                    time.sleep(delay_s)
+                    delay_s *= 2
+                    continue
+
+                self._record_failure()
+                raise GoProResponseError(response.status_code, response.url, response.text)
+            except requests.Timeout as exc:
+                self._record_failure()
+                if attempt == attempts:
+                    raise GoProTimeoutError(f"GoPro request timed out for {url}") from exc
+                time.sleep(delay_s)
+                delay_s *= 2
+            except requests.RequestException as exc:
+                self._record_failure()
+                if attempt == attempts:
+                    raise GoProClientError(f"GoPro request error for {url}: {exc}") from exc
+                time.sleep(delay_s)
+                delay_s *= 2
+
+        raise GoProClientError(f"GoPro request failed after retries for {url}")
 
     @staticmethod
     def _safe_json(response: requests.Response) -> dict[str, Any]:
@@ -82,7 +137,6 @@ class GoProClient:
         self._request(Hero7Endpoint.COMMAND_SHUTTER, params={"p": Hero7Shutter.STOP.value})
         return {"capture_state": "idle"}
 
-    # MCP compatibility aliases
     def start_capture(self) -> dict[str, str]:
         return self.start_shutter()
 
