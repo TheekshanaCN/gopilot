@@ -23,6 +23,9 @@ class CameraIntent:
     mode: CameraMode = CameraMode.VIDEO
     action: CameraAction = CameraAction.NONE
     duration_s: int | None = None
+    confidence: float = 1.0
+    ambiguity: bool = False
+    clarification: str | None = None
 
 
 class Hero7Mode(int, Enum):
@@ -139,4 +142,22 @@ def intent_from_model_payload(payload: dict[str, Any], duration_s: int | None = 
         else CameraAction.NONE
     )
 
-    return CameraIntent(mode=mode, action=action, duration_s=duration_s)
+    confidence = payload.get("confidence", 1.0)
+    try:
+        confidence_value = float(confidence)
+    except (TypeError, ValueError):
+        confidence_value = 0.0
+    confidence_value = max(0.0, min(1.0, confidence_value))
+
+    ambiguity_value = bool(payload.get("ambiguity", False))
+    clarification_value = payload.get("clarification")
+    clarification = str(clarification_value).strip() if clarification_value else None
+
+    return CameraIntent(
+        mode=mode,
+        action=action,
+        duration_s=duration_s,
+        confidence=confidence_value,
+        ambiguity=ambiguity_value,
+        clarification=clarification,
+    )
