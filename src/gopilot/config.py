@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
@@ -33,8 +33,6 @@ class GeminiConfig:
 class GoProConfig:
     host: str = "10.5.5.9"
     timeout_seconds: int = 3
-    mode_urls: dict[str, str] = field(default_factory=dict)
-    shutter_urls: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -52,20 +50,7 @@ def load_config() -> AppConfig:
 
     host = os.getenv("GOPRO_HOST", "10.5.5.9")
     timeout_s = int(os.getenv("GOPRO_TIMEOUT_SECONDS", "3"))
-    base = f"http://{host}/gp/gpControl/command"
 
-    gopro = GoProConfig(
-        host=host,
-        timeout_seconds=timeout_s,
-        mode_urls={
-            "photo": f"{base}/mode?p=1",
-            "video": f"{base}/mode?p=0",
-            "timelapse": f"{base}/mode?p=2",
-        },
-        shutter_urls={
-            "start": f"{base}/shutter?p=1",
-            "stop": f"{base}/shutter?p=0",
-        },
-    )
+    gopro = GoProConfig(host=host, timeout_seconds=timeout_s)
 
     return AppConfig(gemini=GeminiConfig(api_key=gemini_api_key), gopro=gopro)
