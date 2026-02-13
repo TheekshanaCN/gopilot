@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-import google.generativeai as genai
-
 from gopilot.config import GeminiConfig
 from gopilot.gopro.commands import CameraIntent, intent_from_model_payload, parse_duration_seconds
 
@@ -16,22 +14,22 @@ from gopilot.gopro.commands import CameraIntent, intent_from_model_payload, pars
 logger = logging.getLogger(__name__)
 
 
-class _Mode(str, Enum):
+class CommandMode(str, Enum):
     PHOTO = "photo"
     VIDEO = "video"
     TIMELAPSE = "timelapse"
 
 
-class _Action(str, Enum):
+class CommandAction(str, Enum):
     START = "start"
     STOP = "stop"
     NONE = "none"
 
 
 @dataclass(frozen=True)
-class _ParsedModelCommand:
-    mode: _Mode
-    action: _Action
+class ParsedModelCommand:
+    mode: CommandMode
+    action: CommandAction
     confidence: float
     ambiguity: bool
     clarification: str | None
@@ -46,19 +44,19 @@ class _ParsedModelCommand:
         }
 
     @classmethod
-    def fallback(cls, reason: str) -> "_ParsedModelCommand":
+    def fallback(cls, reason: str) -> "ParsedModelCommand":
         return cls(
-            mode=_Mode.VIDEO,
-            action=_Action.NONE,
+            mode=CommandMode.VIDEO,
+            action=CommandAction.NONE,
             confidence=0.0,
             ambiguity=True,
             clarification=f"I could not parse that command ({reason}). Can you clarify the mode and action?",
         )
 
     @classmethod
-    def validate(cls, payload: dict[str, Any]) -> "_ParsedModelCommand":
-        mode = _Mode(str(payload["mode"]).lower())
-        action = _Action(str(payload["action"]).lower())
+    def validate(cls, payload: dict[str, Any]) -> "ParsedModelCommand":
+        mode = CommandMode(str(payload["mode"]).lower())
+        action = CommandAction(str(payload["action"]).lower())
 
         confidence = float(payload.get("confidence", 1.0))
         confidence = max(0.0, min(1.0, confidence))
@@ -67,7 +65,7 @@ class _ParsedModelCommand:
         clarification = str(clarification_raw).strip() if clarification_raw else None
 
         if ambiguity or confidence < 0.6:
-            action = _Action.NONE
+            action = CommandAction.NONE
             if not clarification:
                 clarification = "I am not fully confident. Should I start, stop, or do nothing?"
 
@@ -80,6 +78,10 @@ class _ParsedModelCommand:
         )
 
 
+def validate_model_command_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return ParsedModelCommand.validate(payload).as_payload()
+
+
 class ShotPlanner:
     def __init__(
         self,
@@ -87,6 +89,8 @@ class ShotPlanner:
         api_retries: int = 2,
         initial_backoff_s: float = 0.5,
     ):
+        import google.generativeai as genai
+
         genai.configure(api_key=config.api_key)
         self._model = genai.GenerativeModel(
             model_name=config.model_name,
@@ -121,7 +125,7 @@ class ShotPlanner:
         try:
             raw_response = self._generate_with_retry(user_prompt)
         except Exception as exc:
-            fallback = _ParsedModelCommand.fallback(f"model_api_failure:{type(exc).__name__}")
+            fallback = ParsedModelCommand.fallback(f"model_api_failure:{type(exc).__name__}")
             logger.warning("Model API failed. fallback=%s", fallback.as_payload())
             return fallback.as_payload()
 
@@ -131,19 +135,19 @@ class ShotPlanner:
         try:
             payload = json.loads(raw_response.strip())
         except json.JSONDecodeError:
-            fallback = _ParsedModelCommand.fallback("invalid_json")
+            fallback = ParsedModelCommand.fallback("invalid_json")
             logger.warning("Invalid JSON from model. response=%s fallback=%s", sanitized_response, fallback.as_payload())
             return fallback.as_payload()
 
         if not isinstance(payload, dict):
-            fallback = _ParsedModelCommand.fallback("schema_mismatch")
+            fallback = ParsedModelCommand.fallback("schema_mismatch")
             logger.warning("Schema mismatch from model. payload=%s fallback=%s", payload, fallback.as_payload())
             return fallback.as_payload()
 
         try:
-            parsed = _ParsedModelCommand.validate(payload)
+            parsed = ParsedModelCommand.validate(payload)
         except (KeyError, TypeError, ValueError):
-            fallback = _ParsedModelCommand.fallback("schema_mismatch")
+            fallback = ParsedModelCommand.fallback("schema_mismatch")
             logger.warning("Schema validation failure. payload=%s fallback=%s", payload, fallback.as_payload())
             return fallback.as_payload()
 

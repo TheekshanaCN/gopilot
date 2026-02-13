@@ -47,6 +47,17 @@ class Hero7Endpoint(str, Enum):
     STATE = "/gp/gpControl/info"
     MEDIA_LIST = "/gp/gpMediaList"
 
+COMMAND_ENDPOINT_BY_ACTION: dict[CameraAction, Hero7Endpoint] = {
+    CameraAction.START: Hero7Endpoint.COMMAND_SHUTTER,
+    CameraAction.STOP: Hero7Endpoint.COMMAND_SHUTTER,
+    CameraAction.NONE: Hero7Endpoint.COMMAND_MODE,
+}
+
+
+def endpoint_for_command(action: CameraAction | str) -> Hero7Endpoint:
+    normalized = CameraAction(action)
+    return COMMAND_ENDPOINT_BY_ACTION[normalized]
+
 
 def hero7_setting_path(setting_id: int, option_id: int) -> str:
     return f"{Hero7Endpoint.COMMAND_SETTING.value}/{setting_id}/{option_id}"
