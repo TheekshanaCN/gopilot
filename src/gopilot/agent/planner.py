@@ -5,9 +5,9 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
-from gopilot.config import GeminiConfig
+from gopilot.config import LLMConfig
 from gopilot.gopro.commands import CameraIntent, intent_from_model_payload, parse_duration_seconds
 
 
@@ -78,17 +78,13 @@ class ParsedModelCommand:
         )
 
 
-def validate_model_command_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return ParsedModelCommand.validate(payload).as_payload()
+class LLMClient(Protocol):
+    def generate(self, user_prompt: str) -> str:
+        ...
 
 
-class ShotPlanner:
-    def __init__(
-        self,
-        config: GeminiConfig,
-        api_retries: int = 2,
-        initial_backoff_s: float = 0.5,
-    ):
+class GeminiClient:
+    def __init__(self, config: LLMConfig):
         import google.generativeai as genai
 
         genai.configure(api_key=config.api_key)
@@ -96,6 +92,74 @@ class ShotPlanner:
             model_name=config.model_name,
             system_instruction=config.system_instruction,
         )
+
+    def generate(self, user_prompt: str) -> str:
+        response = self._model.generate_content(user_prompt)
+        return response.text
+
+
+class OpenAIClient:
+    def __init__(self, config: LLMConfig):
+        from openai import OpenAI
+
+        self._client = OpenAI(api_key=config.api_key)
+        self._model_name = config.model_name
+        self._system_instruction = config.system_instruction
+
+    def generate(self, user_prompt: str) -> str:
+        completion = self._client.chat.completions.create(
+            model=self._model_name,
+            messages=[
+                {"role": "system", "content": self._system_instruction},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0,
+        )
+        return completion.choices[0].message.content or "{}"
+
+
+class ClaudeClient:
+    def __init__(self, config: LLMConfig):
+        from anthropic import Anthropic
+
+        self._client = Anthropic(api_key=config.api_key)
+        self._model_name = config.model_name
+        self._system_instruction = config.system_instruction
+
+    def generate(self, user_prompt: str) -> str:
+        response = self._client.messages.create(
+            model=self._model_name,
+            max_tokens=256,
+            temperature=0,
+            system=self._system_instruction,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        text_blocks = [block.text for block in response.content if getattr(block, "type", "") == "text"]
+        return "\n".join(text_blocks) if text_blocks else "{}"
+
+
+def validate_model_command_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return ParsedModelCommand.validate(payload).as_payload()
+
+
+def create_llm_client(config: LLMConfig) -> LLMClient:
+    if config.provider == "gemini":
+        return GeminiClient(config)
+    if config.provider == "openai":
+        return OpenAIClient(config)
+    if config.provider == "claude":
+        return ClaudeClient(config)
+    raise ValueError(f"Unsupported provider: {config.provider}")
+
+
+class ShotPlanner:
+    def __init__(
+        self,
+        config: LLMConfig,
+        api_retries: int = 2,
+        initial_backoff_s: float = 0.5,
+    ):
+        self._client = create_llm_client(config)
         self._api_retries = api_retries
         self._initial_backoff_s = initial_backoff_s
 
@@ -110,8 +174,7 @@ class ShotPlanner:
 
         for attempt in range(1, attempts + 1):
             try:
-                response = self._model.generate_content(user_prompt)
-                return response.text
+                return self._client.generate(user_prompt)
             except Exception:
                 if attempt == attempts:
                     raise

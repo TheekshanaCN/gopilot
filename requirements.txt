@@ -1,0 +1,8 @@
+requests
+python-dotenv
+google-generativeai
+openai
+anthropic
+pydantic
+mcp
+pytest

@@ -13,7 +13,7 @@ def main() -> None:
     configure_logging()
     config = load_config()
     app = GoPilotApp(
-        planner=ShotPlanner(config.gemini),
+        planner=ShotPlanner(config.llm),
         executor=CommandExecutor(GoProClient(config.gopro)),
         coach=LiveCoach(),
     )

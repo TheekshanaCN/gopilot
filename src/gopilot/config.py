@@ -2,31 +2,39 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Literal
 
 from dotenv import load_dotenv
 
 
+DEFAULT_SYSTEM_INSTRUCTION = (
+    "You are a command parser for a GoPro camera.\n\n"
+    "Decide:\n"
+    "- mode: photo, video, timelapse\n"
+    "- action: start, stop, none\n\n"
+    "Return JSON ONLY:\n"
+    "{\n"
+    '  "mode": "photo|video|timelapse",\n'
+    '  "action": "start|stop|none"\n'
+    "}\n\n"
+    "Rules:\n"
+    '- "take photo", "capture", "shoot" => photo + start\n'
+    '- "record", "take a video", "start video" => video + start\n'
+    '- "stop", "stop recording" => action stop\n'
+    '- "timelapse" => timelapse (+ start if implied)\n'
+    "If unclear, pick the closest."
+)
+
+
+LLMProvider = Literal["gemini", "openai", "claude"]
+
+
 @dataclass(frozen=True)
-class GeminiConfig:
+class LLMConfig:
+    provider: LLMProvider
     api_key: str
-    model_name: str = "gemini-3-flash-preview"
-    system_instruction: str = (
-        "You are a command parser for a GoPro camera.\n\n"
-        "Decide:\n"
-        "- mode: photo, video, timelapse\n"
-        "- action: start, stop, none\n\n"
-        "Return JSON ONLY:\n"
-        "{\n"
-        '  "mode": "photo|video|timelapse",\n'
-        '  "action": "start|stop|none"\n'
-        "}\n\n"
-        "Rules:\n"
-        '- "take photo", "capture", "shoot" => photo + start\n'
-        '- "record", "take a video", "start video" => video + start\n'
-        '- "stop", "stop recording" => action stop\n'
-        '- "timelapse" => timelapse (+ start if implied)\n'
-        "If unclear, pick the closest."
-    )
+    model_name: str
+    system_instruction: str = DEFAULT_SYSTEM_INSTRUCTION
 
 
 @dataclass(frozen=True)
@@ -71,17 +79,50 @@ class GoProConfig:
 
 @dataclass(frozen=True)
 class AppConfig:
-    gemini: GeminiConfig
+    llm: LLMConfig
     gopro: GoProConfig
     profile: ConfigProfile
 
 
+def _load_llm_config() -> LLMConfig:
+    provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+    model_name = os.getenv("LLM_MODEL")
+
+    if provider == "gemini":
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("Missing GEMINI_API_KEY. Add it to .env")
+        return LLMConfig(
+            provider="gemini",
+            api_key=api_key,
+            model_name=model_name or "gemini-1.5-flash",
+        )
+
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("Missing OPENAI_API_KEY. Add it to .env")
+        return LLMConfig(
+            provider="openai",
+            api_key=api_key,
+            model_name=model_name or "gpt-4o-mini",
+        )
+
+    if provider == "claude":
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError("Missing ANTHROPIC_API_KEY. Add it to .env")
+        return LLMConfig(
+            provider="claude",
+            api_key=api_key,
+            model_name=model_name or "claude-3-5-sonnet-20241022",
+        )
+
+    raise RuntimeError("Unknown LLM_PROVIDER. Supported: gemini, openai, claude")
+
+
 def load_config() -> AppConfig:
     load_dotenv()
-
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_api_key:
-        raise RuntimeError("Missing GEMINI_API_KEY. Add it to .env")
 
     host = os.getenv("GOPRO_HOST", "10.5.5.9")
     timeout_s = int(os.getenv("GOPRO_TIMEOUT_SECONDS", "3"))
@@ -100,4 +141,4 @@ def load_config() -> AppConfig:
         circuit_breaker_reset_seconds=float(os.getenv("GOPRO_CIRCUIT_RESET_SECONDS", "8")),
     )
 
-    return AppConfig(gemini=GeminiConfig(api_key=gemini_api_key), gopro=gopro, profile=PROFILES[profile_name])
+    return AppConfig(llm=_load_llm_config(), gopro=gopro, profile=PROFILES[profile_name])
