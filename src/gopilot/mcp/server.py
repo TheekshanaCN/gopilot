@@ -107,7 +107,7 @@ class GoPilotMCPServer:
 
     def _register_tools(self) -> None:
         @self.mcp.tool(name="camera.get_status", description="Get the current camera status")
-        def camera_get_status(_args: EmptyInput) -> CameraStatusOutput:
+        def camera_get_status(args: EmptyInput) -> CameraStatusOutput:
             return CameraStatusOutput(**self.client.get_status())
 
         @self.mcp.tool(name="camera.set_mode", description="Set camera mode")
@@ -115,11 +115,11 @@ class GoPilotMCPServer:
             return CameraSetModeOutput(**self.client.set_mode(args.mode))
 
         @self.mcp.tool(name="camera.start_capture", description="Start shutter capture")
-        def camera_start_capture(_args: EmptyInput) -> CaptureOutput:
+        def camera_start_capture(args: EmptyInput) -> CaptureOutput:
             return CaptureOutput(**self.client.start_capture())
 
         @self.mcp.tool(name="camera.stop_capture", description="Stop shutter capture")
-        def camera_stop_capture(_args: EmptyInput) -> CaptureOutput:
+        def camera_stop_capture(args: EmptyInput) -> CaptureOutput:
             return CaptureOutput(**self.client.stop_capture())
 
         @self.mcp.tool(name="camera.set_setting", description="Set a camera setting")
