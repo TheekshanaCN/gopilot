@@ -133,18 +133,11 @@ class GoPilotMCPServer:
 
         @self.mcp.tool(name="camera.download_media", description="Download media by id")
         def camera_download_media(args: CameraDownloadMediaInput) -> CameraDownloadMediaOutput:
-            return CameraDownloadMediaOutput(
-                **self.client.download_media(args.media_id, args.destination)
-            )
+            return CameraDownloadMediaOutput(**self.client.download_media(args.media_id, args.destination))
 
-        @self.mcp.tool(
-            name="agent.start_autovlogger_session",
-            description="Start an automated vlogging session",
-        )
+        @self.mcp.tool(name="agent.start_autovlogger_session", description="Start an automated vlogging session")
         def agent_start_autovlogger_session(args: AgentStartSessionInput) -> AgentStartSessionOutput:
-            return AgentStartSessionOutput(
-                **self.agent.start_autovlogger_session(prompt=args.prompt, mode=args.mode)
-            )
+            return AgentStartSessionOutput(**self.agent.start_autovlogger_session(prompt=args.prompt, mode=args.mode))
 
         @self.mcp.tool(name="agent.stop_session", description="Stop current autovlogger session")
         def agent_stop_session(args: AgentStopSessionInput) -> AgentStopSessionOutput:
@@ -153,34 +146,3 @@ class GoPilotMCPServer:
 
 def build_server(client: Optional[GoProClient] = None, agent: Optional[AutovloggerAgent] = None) -> FastMCP:
     return GoPilotMCPServer(client=client, agent=agent).mcp
-from dataclasses import dataclass
-
-from gopilot.agent.executor import CommandExecutor
-from gopilot.agent.planner import ShotPlanner
-from gopilot.gopro.commands import CameraIntent
-
-
-@dataclass(frozen=True)
-class MCPTool:
-    name: str
-    description: str
-
-
-class GoPilotMCPServer:
-    def __init__(self, planner: ShotPlanner, executor: CommandExecutor):
-        self._planner = planner
-        self._executor = executor
-
-    @staticmethod
-    def tools() -> list[MCPTool]:
-        return [
-            MCPTool(
-                name="plan_and_execute_shot",
-                description="Plan GoPro commands from natural language and execute safely with retries.",
-            )
-        ]
-
-    def plan_and_execute_shot(self, prompt: str) -> CameraIntent:
-        intent = self._planner.plan(prompt)
-        self._executor.execute(intent)
-        return intent
