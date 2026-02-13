@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "gopilot": {
+      "command": "python",
+      "args": [
+        "-m",
+        "gopilot.mcp",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "PYTHONPATH": "src"
+      }
+    }
+  }
+}
